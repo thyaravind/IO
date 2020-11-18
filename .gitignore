@@ -2,3 +2,6 @@ env/
 .ipynb_checkpoints/
 filepaths.py
 .gitignore
+token.pickle
+googlesample.py
+credentials.json
