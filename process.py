@@ -18,22 +18,33 @@ import streamlit as st
 #Reusable Functions and variables
 
 def cus_strip(x):
-    x = re.sub('[A-Za-z% ]','',x)
+    x = re.sub('[A-Za-z% ]*','',x)
     try:
         x = int(x)
     except:
         x = float(x)
     return x
 
+def time_to_hours(x):
+    x = re.sub('[A-Za-z% ]*', '', x)
+    x= int(x.split(':')[0]) + int(x.split(':')[1]) / 60
+    return x
+
 def to_hour_categorical(x):
     bins = pd.IntervalIndex.from_tuples([(0, 4),(4,6),(6,10), (10, 18), (18, 20),(20,24)])
-    def time_to_hours(x):
-        x= int(x.split(':')[0]) + int(x.split(':')[1]) / 60
-        return x
-
     x = x.map(time_to_hours)
     return pd.cut(x,bins)
 
+
+def date_index(df):
+    for column in df.columns:
+        name = re.fullmatch('[ A-Z-z]*(Date|date)[ A-Z-z]*',column)
+    try:
+        df.index = pd.to_datetime(df[name])
+    except:
+        print('error')
+    df.index = df.index.tz_localize(pytz.utc).tz_convert(time_zone).to_period('d')
+    return df
 
 
 
@@ -80,7 +91,7 @@ for file_name in new_files:
 
 
 
-#%% DayOne Journal - loading and processing
+#%% DayOne Journal - loading and processing todo process dayOne
 
 with open('/Users/aravind/Library/Mobile Documents/com~apple~CloudDocs/Documents/IO/2020-9-30-I-O.json') as f:
     journal = json.load(f)
@@ -151,14 +162,14 @@ Nutritiondf.columns = Nutritiondf.columns.str.replace(' ', '_')
 Nutritiondf.index = pd.to_datetime(Nutritiondf.Date)
 Nutritiondf.index = Nutritiondf.index.tz_localize(pytz.utc).tz_convert(time_zone).to_period('d')
 
-foods = Nutritiondf.groupby(level = 0)[' Name'].apply(list)
-meals = Nutritiondf.groupby('Date')['Meal_Type'].apply(set)
+#Daily information of foods and timings
+foods = Nutritiondf.groupby(level = 0)['Name'].apply(list)
+meals = Nutritiondf.groupby(level=0)['Meal_Type'].apply(set)
+meal_timings = to_hour_categorical(Nutritiondf.Time)
 
-
-timing = to_hour_categorical(Nutritiondf.Time)
 
 Nutritiondf = Nutritiondf.drop(columns=['Date','Meal_Type','Name','Time'])
-
+Nutritiondf = Nutritiondf.groupby(level = 0).sum()
 Nutritiondf.info()
 
 #%% Counters - loading and processing
@@ -170,16 +181,24 @@ counterdf.drop(columns = ['Comment'])
 
 
 
-#%%loading and processing activity data from Google sheets
-
+#%%loading and processing activity data from Google sheets #todo process activity data
 
 spreadsheet = '1zBobHYySwSJuzEkJ5wHB0XaFoMpV0QKYzeoQVu724WA'
 range = 'Workouts'
 
-
 activityDf = getGoogleData.get(spreadsheet, range)
 
+activityDf = date_index(activityDf)
 
+activityDf.index = pd.to_datetime(activityDf.Date)
+activityDf.index = activityDf.index.tz_localize(pytz.utc).tz_convert(time_zone).to_period('d')
+
+
+
+activities = activityDf.groupby(level=0)['Meal_Type'].apply(set)
+
+
+activityDf.info()
 
 
 #%%loading and Processing health metrics from Google sheets
@@ -211,20 +230,17 @@ SleepDf.drop(columns=['Date','Data Source','InBed','Awake','Fall Asleep'],axis =
 
 #todo bin and convert start and end times to categorical, edit efficiency
 
-SleepDf.Start = SleepDf.Start.apply(lambda x: int(x.split(':')[0]) + int(x.split(':')[1])/60)
-SleepDf.End = SleepDf.End.apply(lambda x: int(x.split(':')[0]) + int(x.split(':')[1])/60)
-SleepDf.Asleep = SleepDf.Asleep.apply(lambda x: int(x.split(':')[0].strip('h')) + int(x.split(':')[1].strip('m'))/60)
-
+SleepDf.Start = to_hour_categorical(SleepDf.Start)
+SleepDf.End = to_hour_categorical(SleepDf.End)
 
 SleepDf = SleepDf.assign(Efficiency = lambda x: x.Efficiency.map(cus_strip),
-                         Asleep_sum = lambda x: x.groupby(level = 0).sum().Asleep,
-                         Sleep_Start = pd.cut(SleepDf.Start,bins),
-                         Sleep_End = pd.cut(SleepDf.End,bins))
+                         Asleep = lambda x: x.Asleep.map(time_to_hours),
+                         Asleep_sum = lambda x: x.groupby(level = 0).sum().Asleep)
 
 SleepDf = SleepDf.astype({'Wake Count': 'int32','Efficiency':'int32'})
 SleepDf = SleepDf[SleepDf['Main'] == 'TRUE']
-SleepDf.drop(columns=['Asleep','Main','Start','End'],axis = 1,inplace = True)
-SleepDf.rename(columns={'Efficiency':'Sleep_Efficiency','Wake Count': 'Wake_Count'},inplace=True)
+SleepDf.drop(columns=['Asleep','Main'],axis = 1,inplace = True)
+SleepDf.rename(columns={'Efficiency':'Sleep_Efficiency','Wake Count': 'Wake_Count','Start':'Sleep_Start','End':'Sleep_End'},inplace=True)
 
 
 SleepDf.info()
