@@ -15,30 +15,58 @@ register_matplotlib_converters()
 import streamlit as st
 
 
-#Reusable Functions and variables
+#%% Reusable Functions and variables
 
 def cus_strip(x):
+    #strips numerical data and returns the element of numeric type
+    # input: single element or can use as a map on a Series
+    # returns: transformed element of type numeric (int or float)
     x = re.sub('[A-Za-z% ]*','',x)
     try:
         x = int(x)
     except:
         x = float(x)
+    else:
+        print('unable to convert')
     return x
 
 def time_to_hours(x):
+    #converts time in HH:MM format or HH h: MM m etc to hours
+    #input: single element or can use as a map on a Series
+    #returns: transformed element of type int
     x = re.sub('[A-Za-z% ]*', '', x)
     x= int(x.split(':')[0]) + int(x.split(':')[1]) / 60
     return x
 
+def make_set(df, column_name):
+
+    if re.fullmatch('[ A-Z-z]*(Time|time)[ A-Z-z]*', column_name):
+        df[column_name] = to_hour_categorical(df[column_name]).astype('string')
+
+    result = df.groupby(level=0)[f'{column_name}'].apply(set)
+    return result
+
 def to_hour_categorical(x):
+    #converts time in HH:MM format to hour categorical based on the below bins
+    # input: Series (Single column)
+    # returns: transformed Series of type pd.categorical
+
     bins = pd.IntervalIndex.from_tuples([(0, 4),(4,6),(6,10), (10, 18), (18, 20),(20,24)])
     x = x.map(time_to_hours)
     return pd.cut(x,bins)
 
 
 def date_index(df):
+    #searches for Date column and converts the column to dateTime using local time and replaces the current Index
+    #with the newly transformed dateTime column
+    # Note: the time_zone variable is obtained from DayOne Journal data
+    # input: Dataframe
+    # returns: Dataframe with Index set as Datetime index
+
     for column in df.columns:
-        name = re.fullmatch('[ A-Z-z]*(Date|date)[ A-Z-z]*',column)
+        if re.fullmatch('[ A-Z-z]*(Date|date)[ A-Z-z]*',column):
+            name = column
+        #print(f"{column} name:{name}")
     try:
         df.index = pd.to_datetime(df[name])
     except:
@@ -46,6 +74,11 @@ def date_index(df):
     df.index = df.index.tz_localize(pytz.utc).tz_convert(time_zone).to_period('d')
     return df
 
+def rename_columns(df):
+    #strip spaces and replace spaces in between with under_score
+    df.columns = df.columns.str.strip()
+    df.columns = df.columns.str.replace(' ', '_')
+    return df
 
 
 
@@ -96,17 +129,18 @@ for file_name in new_files:
 with open('/Users/aravind/Library/Mobile Documents/com~apple~CloudDocs/Documents/IO/2020-9-30-I-O.json') as f:
     journal = json.load(f)
 
-df = pd.DataFrame(journal['entries'],columns = ['location','creationDate','timeZone','text'])
-df.info()
+journalDf = pd.DataFrame(journal['entries'],columns = ['location','creationDate','timeZone','text'])
+
 
 #Time normalization
 
+time_zone = pytz.timezone(journalDf.timeZone[0])
 
-time_zone = pytz.timezone(df.timeZone[0])
-df.index = pd.to_datetime(df.creationDate)
-df.index = df.index.tz_convert(time_zone).to_period('d')
-df.drop('creationDate',axis = 1,inplace = True)
-df.head()
+journalDf.index = pd.to_datetime(journalDf.creationDate)
+journalDf.index = journalDf.index.tz_convert(time_zone).to_period('d')
+
+journalDf.drop(columns = ['creationDate','timeZone'],inplace = True)
+journalDf.info()
 
 #%% Heart metrics - loading and processing
 with open('/Users/aravind/Library/Mobile Documents/com~apple~CloudDocs/Documents/IO/heart-report-2020-10-19-2020-11-19.csv','rb') as f:
@@ -154,34 +188,41 @@ plt.show()
 #%% Calory and Nutrition - loading and processing
 
 with open('/Users/aravind/Library/Mobile Documents/com~apple~CloudDocs/Documents/IO/CaloryNutritionLog.csv','rb') as f:
-    Nutritiondf = pd.read_csv(f, parse_dates=True)
+    nutritionDf = pd.read_csv(f, parse_dates=True)
 
-Nutritiondf.columns = Nutritiondf.columns.str.strip()
-Nutritiondf.columns = Nutritiondf.columns.str.replace(' ', '_')
+#Processed before creating functions
 
-Nutritiondf.index = pd.to_datetime(Nutritiondf.Date)
-Nutritiondf.index = Nutritiondf.index.tz_localize(pytz.utc).tz_convert(time_zone).to_period('d')
+nutritionDf.columns = nutritionDf.columns.str.strip()
+nutritionDf.columns = nutritionDf.columns.str.replace(' ', '_')
+
+nutritionDf.index = pd.to_datetime(nutritionDf.Date)
+nutritionDf.index = nutritionDf.index.tz_localize(pytz.utc).tz_convert(time_zone).to_period('d')
 
 #Daily information of foods and timings
-foods = Nutritiondf.groupby(level = 0)['Name'].apply(list)
-meals = Nutritiondf.groupby(level=0)['Meal_Type'].apply(set)
-meal_timings = to_hour_categorical(Nutritiondf.Time)
+foods = nutritionDf.groupby(level = 0)['Name'].apply(list)
+meals = nutritionDf.groupby(level=0)['Meal_Type'].apply(set)
 
+nutritionDf.Time = to_hour_categorical(nutritionDf.Time).astype('string')
+meal_timings = nutritionDf.groupby(level=0)['Time'].apply(set)
 
-Nutritiondf = Nutritiondf.drop(columns=['Date','Meal_Type','Name','Time'])
-Nutritiondf = Nutritiondf.groupby(level = 0).sum()
-Nutritiondf.info()
+nutritionDf = nutritionDf.drop(columns=['Date', 'Meal_Type', 'Name', 'Time'])
+nutritionDf = nutritionDf.groupby(level = 0).sum()
+nutritionDf.info()
 
 #%% Counters - loading and processing
 with open('/Users/aravind/Library/Mobile Documents/com~apple~CloudDocs/Documents/IO/counter.csv','rb') as f:
-    counterdf = pd.read_csv(f, parse_dates=True)
-counterdf.info()
-counterdf.drop(columns = ['Comment'])
+    counterDf = pd.read_csv(f, parse_dates=True)
+counterDf.drop(columns = ['Comment'],inplace = True)
 
+counterDf = date_index(counterDf)
+#todo - problem: pivot according to type and aggregate
+counterDf = counterDf.groupby(level = 0,by='Name')[['Name','Count']].sum()
+counterDf = counterDf.pivot(columns = 'Name',values = ['Count'])
+pd.DataFrame.groupby()
 
+counterDf.info()
 
-
-#%%loading and processing activity data from Google sheets #todo process activity data
+#%%loading and processing activity data from Google sheets
 
 spreadsheet = '1zBobHYySwSJuzEkJ5wHB0XaFoMpV0QKYzeoQVu724WA'
 range = 'Workouts'
@@ -189,17 +230,31 @@ range = 'Workouts'
 activityDf = getGoogleData.get(spreadsheet, range)
 
 activityDf = date_index(activityDf)
+activityDf = rename_columns(activityDf)
+activityDf.drop(columns=['Source','Total_Time','Moving_Time','Distance','Elevation_Gain'],inplace= True)
 
-activityDf.index = pd.to_datetime(activityDf.Date)
-activityDf.index = activityDf.index.tz_localize(pytz.utc).tz_convert(time_zone).to_period('d')
+activities = make_set(activityDf,'Type')
+#replaced by above function
+"""activities = activityDf.groupby(level=0)['Type'].apply(set)"""
 
 
+activity_timings= make_set(activityDf,'Time')
+#replaed by above function
+"""activityDf.Time = to_hour_categorical(activityDf.Time).astype('string')
+activity_timings = activityDf.groupby(level=0)['Time'].apply(set)"""
 
-activities = activityDf.groupby(level=0)['Meal_Type'].apply(set)
+activityDf.Elapsed_Time = activityDf.Elapsed_Time.map(time_to_hours)
 
 
+#todo - problem: unable to convert to numerical
+"""
+activityDf = activityDf.assign(Heart_Rate = lambda x: x.Heart_Rate.map(cus_strip),
+                               Active_Calories = lambda x: x.Active_Calories.map(cus_strip))
+"""
+
+
+activityDf.drop(columns=['Date', 'Type', 'Time'],inplace= True)
 activityDf.info()
-
 
 #%%loading and Processing health metrics from Google sheets
 
@@ -212,8 +267,8 @@ dailyDf.index = dailyDf.index.tz_localize(pytz.utc).tz_convert(time_zone).to_per
 
 dailyDf.drop(columns=['Date','VO₂ max'],axis = 1,inplace = True)
 
-#todo unable to convert to numeric - problem
-dailyDf = dailyDf.astype('float')
+#todo - problem: unable to convert to numeric
+#dailyDf = dailyDf.astype('float')
 
 dailyDf.rename(columns = {'Active Energy': 'Active_Energy','Resting Energy': 'Resting_Energy','Resting':'Resting_HR'},inplace=True)
 dailyDf.info()
@@ -227,8 +282,6 @@ SleepDf = getGoogleData.get(spreadsheet, range)
 SleepDf.index = pd.to_datetime(SleepDf.Date)
 SleepDf.index = SleepDf.index.tz_localize(pytz.utc).tz_convert(time_zone).to_period('d')
 SleepDf.drop(columns=['Date','Data Source','InBed','Awake','Fall Asleep'],axis = 1,inplace = True)
-
-#todo bin and convert start and end times to categorical, edit efficiency
 
 SleepDf.Start = to_hour_categorical(SleepDf.Start)
 SleepDf.End = to_hour_categorical(SleepDf.End)
